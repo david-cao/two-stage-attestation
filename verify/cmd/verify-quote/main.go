@@ -7,9 +7,9 @@ import (
 	"log"
 	"os"
 
+	"github.com/google/go-tdx-guest/abi"
 	"github.com/google/go-tdx-guest/proto/tdx"
 	"github.com/google/go-tdx-guest/verify"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/davidcao/attestation-two-stage/verify/internal/policy"
 )
@@ -30,15 +30,19 @@ func main() {
 		log.Fatalf("read quote: %v", err)
 	}
 
-	// Parse quote protobuf.
-	var quote tdx.QuoteV4
-	if err := proto.Unmarshal(quoteBytes, &quote); err != nil {
+	// Parse raw TDX quote (Intel binary format) into protobuf.
+	quoteAny, err := abi.QuoteToProto(quoteBytes)
+	if err != nil {
 		log.Fatalf("parse quote: %v", err)
+	}
+	quote, ok := quoteAny.(*tdx.QuoteV4)
+	if !ok {
+		log.Fatalf("unexpected quote type: %T (expected QuoteV4)", quoteAny)
 	}
 
 	// Verify quote signature and TCB.
 	opts := &verify.Options{}
-	if err := verify.TdxQuote(&quote, opts); err != nil {
+	if err := verify.TdxQuote(quote, opts); err != nil {
 		log.Fatalf("quote verification failed: %v", err)
 	}
 	fmt.Println("quote signature: VALID")
