@@ -1,10 +1,10 @@
 module github.com/davidcao/attestation-two-stage/verify
 
-go 1.23
+go 1.22
 
 require (
 	github.com/google/go-tdx-guest v0.3.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.35.2
 )
 
 require (
