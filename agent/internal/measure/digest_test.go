@@ -67,6 +67,54 @@ func TestComputeExpectedRTMR2(t *testing.T) {
 	}
 }
 
+func TestComputeWorkloadMeasurement(t *testing.T) {
+	digest := "sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4"
+	cmd := []string{"echo", "hello"}
+
+	m1 := ComputeWorkloadMeasurement(digest, cmd)
+	if len(m1) != 48 {
+		t.Fatalf("expected 48 bytes, got %d", len(m1))
+	}
+
+	// Deterministic.
+	m2 := ComputeWorkloadMeasurement(digest, cmd)
+	if hex.EncodeToString(m1) != hex.EncodeToString(m2) {
+		t.Fatal("should be deterministic")
+	}
+
+	// Different command produces different measurement.
+	m3 := ComputeWorkloadMeasurement(digest, []string{"sh", "-c", "exit"})
+	if hex.EncodeToString(m1) == hex.EncodeToString(m3) {
+		t.Fatal("different commands should produce different measurements")
+	}
+
+	// Same image, no command vs with command.
+	m4 := ComputeWorkloadMeasurement(digest, nil)
+	if hex.EncodeToString(m1) == hex.EncodeToString(m4) {
+		t.Fatal("empty command should differ from non-empty")
+	}
+}
+
+func TestComputeExpectedRTMR2From(t *testing.T) {
+	pre := make([]byte, 48)
+	pre[0] = 0xab // simulate non-zero initial RTMR[2]
+	measurement := ComputeWorkloadMeasurement(
+		"sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4",
+		[]string{"echo", "hello"},
+	)
+	result := ComputeExpectedRTMR2From(pre, measurement)
+	if len(result) != 48 {
+		t.Fatalf("expected 48 bytes, got %d", len(result))
+	}
+
+	// Different pre-extension values produce different results.
+	pre2 := make([]byte, 48)
+	result2 := ComputeExpectedRTMR2From(pre2, measurement)
+	if hex.EncodeToString(result) == hex.EncodeToString(result2) {
+		t.Fatal("different pre-extension values should produce different results")
+	}
+}
+
 func TestExtendSHA384(t *testing.T) {
 	old := make([]byte, 48)
 	data := make([]byte, 48)

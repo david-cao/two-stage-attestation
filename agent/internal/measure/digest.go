@@ -46,19 +46,38 @@ func DigestForRTMR(manifestDigest string) ([]byte, error) {
 	return PadToSHA384(raw), nil
 }
 
+// ComputeWorkloadMeasurement computes the 48-byte value to extend into RTMR[2]
+// for a given workload. The measurement covers both the image identity and the
+// command, so two containers from the same image but different commands produce
+// different RTMR[2] values.
+//
+// Formula: pad48(SHA256(manifest_digest || "\0" || command[0] || "\0" || command[1] || ...))
+func ComputeWorkloadMeasurement(manifestDigest string, command []string) []byte {
+	h := sha256.New()
+	h.Write([]byte(manifestDigest))
+	for _, c := range command {
+		h.Write([]byte{0})
+		h.Write([]byte(c))
+	}
+	return PadToSHA384(h.Sum(nil))
+}
+
 // ComputeExpectedRTMR2 computes the expected RTMR[2] value after extending
-// from the initial zero state with a single manifest digest.
-// RTMR extension: new = SHA384(old || data), where old starts as 48 zero bytes.
+// from the initial zero state with a single manifest digest (legacy, does not
+// include command). Use ComputeExpectedRTMR2From for non-zero initial states.
 func ComputeExpectedRTMR2(manifestDigest string) ([]byte, error) {
 	padded, err := DigestForRTMR(manifestDigest)
 	if err != nil {
 		return nil, err
 	}
-
-	// RTMR[2] starts as 48 zero bytes.
 	old := make([]byte, 48)
-
 	return ExtendSHA384(old, padded), nil
+}
+
+// ComputeExpectedRTMR2From computes the expected RTMR[2] given an arbitrary
+// initial RTMR[2] value and a workload measurement (48 bytes).
+func ComputeExpectedRTMR2From(rtmr2Pre []byte, measurement []byte) []byte {
+	return ExtendSHA384(rtmr2Pre, measurement)
 }
 
 // ExtendSHA384 computes SHA384(old || data), mimicking RTMR extension.

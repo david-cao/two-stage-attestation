@@ -90,10 +90,15 @@ type LaunchResponse struct {
 	ContainerId string `protobuf:"bytes,1,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
 	// SHA-256 OCI manifest digest that was measured.
 	ManifestDigest string `protobuf:"bytes,2,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
-	// Hex-encoded RTMR[2] value after extension.
-	Rtmr2Value    string `protobuf:"bytes,3,opt,name=rtmr2_value,json=rtmr2Value,proto3" json:"rtmr2_value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Hex-encoded RTMR[2] value after extension (assumes zero initial state;
+	// may not match actual RTMR[2] on cloud CVMs).
+	Rtmr2Value string `protobuf:"bytes,3,opt,name=rtmr2_value,json=rtmr2Value,proto3" json:"rtmr2_value,omitempty"`
+	// Hex-encoded workload measurement that was extended into RTMR[2].
+	// This is pad48(SHA256(manifest_digest || "\0" || command...)).
+	// A verifier can compute expected RTMR[2] as SHA384(rtmr2_pre || this).
+	WorkloadMeasurement string `protobuf:"bytes,4,opt,name=workload_measurement,json=workloadMeasurement,proto3" json:"workload_measurement,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *LaunchResponse) Reset() {
@@ -143,6 +148,13 @@ func (x *LaunchResponse) GetManifestDigest() string {
 func (x *LaunchResponse) GetRtmr2Value() string {
 	if x != nil {
 		return x.Rtmr2Value
+	}
+	return ""
+}
+
+func (x *LaunchResponse) GetWorkloadMeasurement() string {
+	if x != nil {
+		return x.WorkloadMeasurement
 	}
 	return ""
 }
@@ -443,12 +455,13 @@ const file_agent_api_v1_agent_proto_rawDesc = "" +
 	"\rLaunchRequest\x12\x1b\n" +
 	"\timage_ref\x18\x01 \x01(\tR\bimageRef\x12\x18\n" +
 	"\acommand\x18\x02 \x03(\tR\acommand\x12\x10\n" +
-	"\x03env\x18\x03 \x03(\tR\x03env\"}\n" +
+	"\x03env\x18\x03 \x03(\tR\x03env\"\xb0\x01\n" +
 	"\x0eLaunchResponse\x12!\n" +
 	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12'\n" +
 	"\x0fmanifest_digest\x18\x02 \x01(\tR\x0emanifestDigest\x12\x1f\n" +
 	"\vrtmr2_value\x18\x03 \x01(\tR\n" +
-	"rtmr2Value\"/\n" +
+	"rtmr2Value\x121\n" +
+	"\x14workload_measurement\x18\x04 \x01(\tR\x13workloadMeasurement\"/\n" +
 	"\fQuoteRequest\x12\x1f\n" +
 	"\vreport_data\x18\x01 \x01(\fR\n" +
 	"reportData\"D\n" +

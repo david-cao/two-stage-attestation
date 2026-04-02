@@ -2,7 +2,7 @@
 # test-e2e.sh — End-to-end test of the attestation agent on TDX hardware.
 #
 # Prerequisites:
-#   - Agent running: ./bin/attestation-agent --listen tcp://localhost:4050
+#   - Agent running: sudo ./bin/attestation-agent --listen tcp://localhost:4050
 #   - grpcurl installed (or go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest)
 #   - jq installed
 #   - podman available (for container launch test)
@@ -38,6 +38,32 @@ if ! command -v grpcurl &>/dev/null; then
     export PATH="$PATH:$(go env GOPATH)/bin"
 fi
 
+# Helper: get a quote and extract raw bytes + RTMR[2].
+# Usage: get_quote <output-bin-path>
+# Sets: $last_quote_rtmr2 (hex)
+last_quote_rtmr2=""
+get_quote() {
+    local out_path="$1"
+    local rd_b64
+    rd_b64=$(head -c 64 /dev/urandom | base64 | tr -d '\n')
+    local qj
+    qj=$(grpcurl -plaintext -d "{\"report_data\": \"$rd_b64\"}" \
+        "$AGENT_ADDR" attestation.agent.v1.AttestationAgent/GetQuote 2>&1) || return 1
+    local qb64
+    qb64=$(echo "$qj" | jq -r '.quote // empty')
+    [ -n "$qb64" ] || return 1
+    echo -n "$qb64" | base64 -d > "$out_path"
+
+    # Parse RTMR[2] from the quote via verify-quote (wildcard policy).
+    local wildcard="$OUTDIR/_wildcard.json"
+    cat > "$wildcard" <<'WC'
+{"entries":[{"description":"wildcard","mrtd":"","rtmr0":"","rtmr1":"","rtmr2":""}]}
+WC
+    local vout
+    vout=$("$REPO_ROOT/bin/verify-quote" --quote "$out_path" --policy "$wildcard" 2>&1) || return 1
+    last_quote_rtmr2=$(echo "$vout" | grep 'RTMR\[2\]' | awk '{print $2}')
+}
+
 echo "=== E2E Test Suite ==="
 echo "Agent address: $AGENT_ADDR"
 echo ""
@@ -70,8 +96,21 @@ fi
 
 echo ""
 
-# ---------- Test 2: LaunchContainer ----------
-echo "--- Test 2: LaunchContainer ---"
+# ---------- Test 2: Baseline quote (pre-launch RTMR[2]) ----------
+echo "--- Test 2: Baseline quote ---"
+rtmr2_pre=""
+if get_quote "$OUTDIR/quote-baseline.bin"; then
+    rtmr2_pre="$last_quote_rtmr2"
+    ok "baseline RTMR[2]: $rtmr2_pre"
+else
+    err "failed to get baseline quote"
+fi
+
+echo ""
+
+# ---------- Test 3: LaunchContainer ----------
+echo "--- Test 3: LaunchContainer ---"
+workload_measurement=""
 launch_json=$(grpcurl -plaintext -d '{
   "image_ref": "docker.io/library/alpine:latest",
   "command": ["echo", "hello from measured container"]
@@ -79,14 +118,13 @@ launch_json=$(grpcurl -plaintext -d '{
     err "LaunchContainer RPC failed"
     echo "  Output: $launch_json"
     echo ""
-    # Continue with remaining tests.
     launch_json=""
 }
 
 if [ -n "$launch_json" ]; then
     container_id=$(echo "$launch_json" | jq -r '.containerId // empty')
     manifest_digest=$(echo "$launch_json" | jq -r '.manifestDigest // empty')
-    rtmr2_hex=$(echo "$launch_json" | jq -r '.rtmr2Value // empty')
+    workload_measurement=$(echo "$launch_json" | jq -r '.workloadMeasurement // empty')
 
     if [ -n "$container_id" ]; then
         ok "container launched: $container_id"
@@ -100,79 +138,36 @@ if [ -n "$launch_json" ]; then
         err "no manifest_digest in response"
     fi
 
-    if [ -n "$rtmr2_hex" ]; then
-        ok "RTMR[2] extended: ${rtmr2_hex:0:32}..."
+    if [ -n "$workload_measurement" ]; then
+        ok "workload measurement: ${workload_measurement:0:32}..."
     else
-        err "no rtmr2_value in response"
+        err "no workload_measurement in response"
     fi
 fi
 
 echo ""
 
-# ---------- Test 3: GetQuote ----------
-echo "--- Test 3: GetQuote ---"
-# Generate 64 bytes of random report data.
-report_data_b64=$(head -c 64 /dev/urandom | base64 | tr -d '\n')
-
-quote_json=$(grpcurl -plaintext -d "{\"report_data\": \"$report_data_b64\"}" \
-    "$AGENT_ADDR" attestation.agent.v1.AttestationAgent/GetQuote 2>&1) || {
-    err "GetQuote RPC failed"
-    echo "  Output: $quote_json"
-    quote_json=""
-}
-
-if [ -n "$quote_json" ]; then
-    # Extract quote bytes (base64-encoded in grpcurl JSON output).
-    quote_b64=$(echo "$quote_json" | jq -r '.quote // empty')
-
-    if [ -n "$quote_b64" ]; then
-        ok "quote generated ($(echo -n "$quote_b64" | wc -c | tr -d ' ') base64 chars)"
-
-        # Decode and save raw quote for verify-quote.
-        echo -n "$quote_b64" | base64 -d > "$OUTDIR/quote.bin"
-        ok "quote saved to $OUTDIR/quote.bin ($(wc -c < "$OUTDIR/quote.bin" | tr -d ' ') bytes)"
-    else
-        err "no quote in response"
-    fi
-
-    # Check for certificate chain.
-    cert_chain=$(echo "$quote_json" | jq -r '.certChain // empty')
-    if [ -n "$cert_chain" ]; then
-        ok "certificate chain present"
-    else
-        echo "  INFO: no certificate chain (expected on some platforms)"
-    fi
+# ---------- Test 4: Post-launch quote ----------
+echo "--- Test 4: Post-launch quote ---"
+rtmr2_post=""
+if get_quote "$OUTDIR/quote.bin"; then
+    rtmr2_post="$last_quote_rtmr2"
+    ok "post-launch RTMR[2]: ${rtmr2_post:0:32}..."
+else
+    err "failed to get post-launch quote"
 fi
 
 echo ""
 
-# ---------- Test 4: Verify quote ----------
-echo "--- Test 4: Quote verification ---"
+# ---------- Test 5: Verify quote signature + RTMR[2] computation ----------
+echo "--- Test 5: Quote verification ---"
 if [ -f "$OUTDIR/quote.bin" ]; then
-    # Use a wildcard policy for cloud CVM testing (we don't control Stage 1 measurements).
-    # Only check RTMR[2] if we have it from LaunchContainer.
     policy_file="$OUTDIR/policy.json"
-
-    if [ -n "${rtmr2_hex:-}" ]; then
-        cat > "$policy_file" <<POLICY
+    cat > "$policy_file" <<POLICY
 {
   "entries": [
     {
-      "description": "cloud CVM - wildcard stage 1, verify RTMR[2] only",
-      "mrtd":  "",
-      "rtmr0": "",
-      "rtmr1": "",
-      "rtmr2": "$rtmr2_hex"
-    }
-  ]
-}
-POLICY
-    else
-        cat > "$policy_file" <<POLICY
-{
-  "entries": [
-    {
-      "description": "cloud CVM - all wildcards (signature check only)",
+      "description": "cloud CVM - all wildcards (signature and format check only)",
       "mrtd":  "",
       "rtmr0": "",
       "rtmr1": "",
@@ -181,9 +176,15 @@ POLICY
   ]
 }
 POLICY
+
+    # Build verify-quote flags: if we have baseline RTMR[2] and workload
+    # measurement, pass them so verify-quote can check the RTMR[2] transition.
+    verify_flags=()
+    if [ -n "$rtmr2_pre" ] && [ -n "$workload_measurement" ]; then
+        verify_flags+=(--rtmr2-pre "$rtmr2_pre" --measurement "$workload_measurement")
     fi
 
-    verify_out=$("$REPO_ROOT/bin/verify-quote" --quote "$OUTDIR/quote.bin" --policy "$policy_file" 2>&1) || {
+    verify_out=$("$REPO_ROOT/bin/verify-quote" --quote "$OUTDIR/quote.bin" --policy "$policy_file" "${verify_flags[@]}" 2>&1) || {
         err "verify-quote failed"
         echo "  Output: $verify_out"
         verify_out=""
@@ -191,36 +192,36 @@ POLICY
 
     if [ -n "$verify_out" ]; then
         if echo "$verify_out" | grep -q "policy check: PASSED"; then
-            ok "quote verification and policy check passed"
+            ok "quote signature and policy check passed"
         else
             err "policy check did not pass"
         fi
-        # Print the measurements for inspection.
-        echo "$verify_out" | grep -E "^(MRTD|RTMR|quote)" | sed 's/^/  /'
+
+        if echo "$verify_out" | grep -q "RTMR\[2\] verification: PASSED"; then
+            ok "RTMR[2] = SHA384(rtmr2_pre || workload_measurement) — verified"
+        elif [ -n "$rtmr2_pre" ] && [ -n "$workload_measurement" ]; then
+            err "RTMR[2] computation mismatch"
+        fi
+
+        # Print measurements.
+        echo "$verify_out" | grep -E "^(MRTD|RTMR|quote|  )" | sed 's/^/  /'
     fi
 else
-    echo "  SKIP: no quote file (GetQuote failed)"
+    echo "  SKIP: no quote file"
 fi
 
 echo ""
 
-# ---------- Test 5: RTMR[2] consistency check ----------
-echo "--- Test 5: RTMR[2] consistency ---"
-if [ -n "${manifest_digest:-}" ] && [ -n "${verify_out:-}" ]; then
-    # Extract RTMR[2] from the quote (as printed by verify-quote).
-    quote_rtmr2=$(echo "$verify_out" | grep 'RTMR\[2\]' | awk '{print $2}')
-
-    if [ -n "$quote_rtmr2" ] && [ -n "${rtmr2_hex:-}" ]; then
-        if [ "$quote_rtmr2" = "$rtmr2_hex" ]; then
-            ok "RTMR[2] in quote matches LaunchContainer response"
-        else
-            err "RTMR[2] mismatch: quote=$quote_rtmr2 vs launch=$rtmr2_hex"
-        fi
+# ---------- Test 6: RTMR[2] changed after extension ----------
+echo "--- Test 6: RTMR[2] pre vs post ---"
+if [ -n "$rtmr2_pre" ] && [ -n "$rtmr2_post" ]; then
+    if [ "$rtmr2_pre" != "$rtmr2_post" ]; then
+        ok "RTMR[2] changed after LaunchContainer"
     else
-        echo "  SKIP: could not extract RTMR[2] for comparison"
+        err "RTMR[2] did not change — extension may have failed"
     fi
 else
-    echo "  SKIP: missing manifest_digest or verify output"
+    echo "  SKIP: missing pre or post RTMR[2]"
 fi
 
 echo ""

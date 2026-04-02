@@ -52,23 +52,22 @@ func (s *Server) LaunchContainer(ctx context.Context, req *pb.LaunchRequest) (*p
 	}
 	log.Printf("manifest digest: %s", digest)
 
-	// 3. Pad digest to 48 bytes and extend RTMR[2].
-	paddedDigest, err := measure.DigestForRTMR(digest)
-	if err != nil {
-		return nil, fmt.Errorf("prepare digest for RTMR: %w", err)
-	}
+	// 3. Compute workload measurement: pad48(SHA256(digest || "\0" || cmd...))
+	workloadMeasurement := measure.ComputeWorkloadMeasurement(digest, req.Command)
+	log.Printf("workload measurement: %s", hex.EncodeToString(workloadMeasurement))
 
-	if err := s.rtmr.ExtendDigest(2, paddedDigest); err != nil {
+	// 4. Extend RTMR[2] with the workload measurement.
+	if err := s.rtmr.ExtendDigest(2, workloadMeasurement); err != nil {
 		log.Printf("WARNING: RTMR extension failed (no TDX hardware?): %v", err)
 	}
 
-	// 4. Compute expected RTMR[2] value for the response.
-	expectedRTMR2, err := measure.ComputeExpectedRTMR2(digest)
-	if err != nil {
-		return nil, fmt.Errorf("compute expected RTMR[2]: %w", err)
-	}
+	// 5. Compute expected RTMR[2] assuming zero initial state (for bare metal).
+	// On cloud CVMs the actual RTMR[2] will differ; use a pre-launch quote
+	// to get the real initial value and recompute.
+	zeroRTMR := make([]byte, 48)
+	expectedRTMR2 := measure.ComputeExpectedRTMR2From(zeroRTMR, workloadMeasurement)
 
-	// 5. Start container.
+	// 6. Start container.
 	containerID, err := s.runtime.Run(container.RunConfig{
 		ImageRef: req.ImageRef,
 		Command:  req.Command,
@@ -80,9 +79,10 @@ func (s *Server) LaunchContainer(ctx context.Context, req *pb.LaunchRequest) (*p
 	log.Printf("started container %s", containerID)
 
 	return &pb.LaunchResponse{
-		ContainerId:    containerID,
-		ManifestDigest: digest,
-		Rtmr2Value:     hex.EncodeToString(expectedRTMR2),
+		ContainerId:          containerID,
+		ManifestDigest:       digest,
+		Rtmr2Value:           hex.EncodeToString(expectedRTMR2),
+		WorkloadMeasurement:  hex.EncodeToString(workloadMeasurement),
 	}, nil
 }
 

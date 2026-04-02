@@ -35,8 +35,13 @@ message LaunchResponse {
   string container_id = 1;
   // SHA-256 OCI manifest digest that was measured.
   string manifest_digest = 2;
-  // Hex-encoded RTMR[2] value after extension.
+  // Hex-encoded RTMR[2] value after extension (assumes zero initial state;
+  // may not match actual RTMR[2] on cloud CVMs).
   string rtmr2_value = 3;
+  // Hex-encoded workload measurement that was extended into RTMR[2].
+  // This is pad48(SHA256(manifest_digest || "\0" || command...)).
+  // A verifier can compute expected RTMR[2] as SHA384(rtmr2_pre || this).
+  string workload_measurement = 4;
 }
 
 message QuoteRequest {

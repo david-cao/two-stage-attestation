@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha512"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 func main() {
 	quotePath := flag.String("quote", "", "path to raw TDX quote blob")
 	policyPath := flag.String("policy", "", "path to policy JSON file")
+	rtmr2PreHex := flag.String("rtmr2-pre", "", "hex-encoded RTMR[2] before workload extension (from baseline quote)")
+	measurementHex := flag.String("measurement", "", "hex-encoded workload measurement extended into RTMR[2]")
 	flag.Parse()
 
 	if *quotePath == "" || *policyPath == "" {
@@ -70,6 +73,34 @@ func main() {
 	fmt.Printf("RTMR[1]: %s\n", hex.EncodeToString(m.RTMR1))
 	fmt.Printf("RTMR[2]: %s\n", hex.EncodeToString(m.RTMR2))
 
+	// If --rtmr2-pre and --measurement are provided, verify RTMR[2] by
+	// computing the expected value: SHA384(rtmr2_pre || measurement).
+	if *rtmr2PreHex != "" && *measurementHex != "" {
+		rtmr2Pre, err := hex.DecodeString(*rtmr2PreHex)
+		if err != nil {
+			log.Fatalf("decode --rtmr2-pre: %v", err)
+		}
+		measurement, err := hex.DecodeString(*measurementHex)
+		if err != nil {
+			log.Fatalf("decode --measurement: %v", err)
+		}
+
+		expected := extendSHA384(rtmr2Pre, measurement)
+		expectedHex := hex.EncodeToString(expected)
+		actualHex := hex.EncodeToString(m.RTMR2)
+
+		fmt.Printf("\nRTMR[2] verification:\n")
+		fmt.Printf("  pre-extension: %s\n", *rtmr2PreHex)
+		fmt.Printf("  measurement:   %s\n", *measurementHex)
+		fmt.Printf("  expected:      %s\n", expectedHex)
+		fmt.Printf("  actual:        %s\n", actualHex)
+
+		if expectedHex != actualHex {
+			log.Fatalf("RTMR[2] verification FAILED: expected %s, got %s", expectedHex, actualHex)
+		}
+		fmt.Println("  RTMR[2] verification: PASSED")
+	}
+
 	// Load and check policy.
 	pol, err := policy.LoadPolicy(*policyPath)
 	if err != nil {
@@ -81,4 +112,12 @@ func main() {
 	}
 
 	fmt.Println("policy check: PASSED")
+}
+
+func extendSHA384(old, data []byte) []byte {
+	combined := make([]byte, len(old)+len(data))
+	copy(combined, old)
+	copy(combined[len(old):], data)
+	h := sha512.Sum384(combined)
+	return h[:]
 }
