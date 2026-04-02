@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/google/go-configfs-tsm/configfs/configfsi"
-	"github.com/google/go-configfs-tsm/configfs/linuxtsm"
-	"github.com/google/go-configfs-tsm/rtmr"
+	"github.com/google/go-tdx-guest/rtmr"
 )
 
 // RTMRExtender abstracts RTMR extension so it can be mocked in tests.
@@ -16,30 +14,32 @@ type RTMRExtender interface {
 	ExtendDigest(index int, digest []byte) error
 }
 
-// TDXRTMRExtender extends RTMRs via the configfs-tsm kernel interface.
-type TDXRTMRExtender struct {
-	client configfsi.Client
-}
+// TDXRTMRExtender extends RTMRs via the kernel interface. It auto-detects
+// whether to use the legacy configfs-tsm path (/sys/kernel/config/tsm/rtmrs)
+// or the newer sysfs path (/sys/class/misc/tdx_guest/measurements/).
+type TDXRTMRExtender struct{}
 
 // NewTDXRTMRExtender creates a real RTMR extender that talks to the kernel.
 func NewTDXRTMRExtender() (*TDXRTMRExtender, error) {
-	client, err := linuxtsm.MakeClient()
-	if err != nil {
-		return nil, fmt.Errorf("open configfs-tsm client: %w", err)
-	}
-	return &TDXRTMRExtender{client: client}, nil
+	return &TDXRTMRExtender{}, nil
 }
 
 func (e *TDXRTMRExtender) ExtendDigest(index int, digest []byte) error {
 	if len(digest) != 48 {
 		return fmt.Errorf("RTMR digest must be 48 bytes (SHA-384), got %d", len(digest))
 	}
-	return rtmr.ExtendDigest(e.client, index, digest)
+	return rtmr.ExtendDigest(index, digest)
 }
 
 // DetectTDX returns true if TDX hardware appears to be available.
 func DetectTDX() bool {
-	// configfs-tsm is mounted at /sys/kernel/config/tsm when TDX is available.
-	_, err := os.Stat("/sys/kernel/config/tsm")
-	return err == nil
+	// Check configfs-tsm (standard path).
+	if _, err := os.Stat("/sys/kernel/config/tsm"); err == nil {
+		return true
+	}
+	// Check sysfs tdx_guest device (newer kernels).
+	if _, err := os.Stat("/sys/class/misc/tdx_guest"); err == nil {
+		return true
+	}
+	return false
 }
