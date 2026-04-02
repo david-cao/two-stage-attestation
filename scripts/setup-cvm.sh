@@ -55,6 +55,16 @@ go_version=$(go version | grep -oP '1\.\d+' | head -1)
 echo "  Go version: $go_version"
 
 echo ""
+echo "=== Configuring rootless podman ==="
+if ! grep -q "^$(whoami):" /etc/subuid 2>/dev/null; then
+    sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$(whoami)"
+    podman system migrate
+    echo "  Configured subuid/subgid for $(whoami)"
+else
+    echo "  subuid/subgid already configured"
+fi
+
+echo ""
 echo "=== Building agent and verify-quote ==="
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

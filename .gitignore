@@ -1,6 +1,9 @@
 # Build output
 bin/
 
+# E2E test output
+test-e2e-out/
+
 # Go
 *.exe
 *.test

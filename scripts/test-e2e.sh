@@ -15,8 +15,8 @@ set -euo pipefail
 
 AGENT_ADDR="${1:-localhost:4050}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+OUTDIR="$PWD/test-e2e-out"
+mkdir -p "$OUTDIR"
 
 pass=0
 fail=0
@@ -129,8 +129,8 @@ if [ -n "$quote_json" ]; then
         ok "quote generated ($(echo -n "$quote_b64" | wc -c | tr -d ' ') base64 chars)"
 
         # Decode and save raw quote for verify-quote.
-        echo -n "$quote_b64" | base64 -d > "$TMPDIR/quote.bin"
-        ok "quote saved to $TMPDIR/quote.bin ($(wc -c < "$TMPDIR/quote.bin" | tr -d ' ') bytes)"
+        echo -n "$quote_b64" | base64 -d > "$OUTDIR/quote.bin"
+        ok "quote saved to $OUTDIR/quote.bin ($(wc -c < "$OUTDIR/quote.bin" | tr -d ' ') bytes)"
     else
         err "no quote in response"
     fi
@@ -148,10 +148,10 @@ echo ""
 
 # ---------- Test 4: Verify quote ----------
 echo "--- Test 4: Quote verification ---"
-if [ -f "$TMPDIR/quote.bin" ]; then
+if [ -f "$OUTDIR/quote.bin" ]; then
     # Use a wildcard policy for cloud CVM testing (we don't control Stage 1 measurements).
     # Only check RTMR[2] if we have it from LaunchContainer.
-    policy_file="$TMPDIR/policy.json"
+    policy_file="$OUTDIR/policy.json"
 
     if [ -n "${rtmr2_hex:-}" ]; then
         cat > "$policy_file" <<POLICY
@@ -183,7 +183,7 @@ POLICY
 POLICY
     fi
 
-    verify_out=$("$REPO_ROOT/bin/verify-quote" --quote "$TMPDIR/quote.bin" --policy "$policy_file" 2>&1) || {
+    verify_out=$("$REPO_ROOT/bin/verify-quote" --quote "$OUTDIR/quote.bin" --policy "$policy_file" 2>&1) || {
         err "verify-quote failed"
         echo "  Output: $verify_out"
         verify_out=""
