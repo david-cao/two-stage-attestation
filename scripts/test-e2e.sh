@@ -23,12 +23,12 @@ fail=0
 
 ok() {
     echo "  PASS: $1"
-    ((pass++))
+    pass=$((pass + 1))
 }
 
 err() {
     echo "  FAIL: $1"
-    ((fail++))
+    fail=$((fail + 1))
 }
 
 # Ensure grpcurl is available.
