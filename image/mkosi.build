@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+
+# Build the attestation-agent binary for the target image.
+# mkosi runs this script during the build phase.
+
+cd "$SRCDIR/agent"
+
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+    -ldflags="-s -w" \
+    -o "$DESTDIR/usr/bin/attestation-agent" \
+    ./cmd/attestation-agent

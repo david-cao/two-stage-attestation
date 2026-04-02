@@ -1,0 +1,11 @@
+{
+  "entries": [
+    {
+      "description": "cloud CVM testing - wildcard Stage 1, check RTMR[2] for alpine:latest",
+      "mrtd":  "",
+      "rtmr0": "",
+      "rtmr1": "",
+      "rtmr2": ""
+    }
+  ]
+}

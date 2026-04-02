@@ -1,0 +1,9 @@
+# Attestation Agent configuration.
+
+[server]
+# Listen address. The agent listens on a vsock for communication with the host.
+listen = "vsock://:4050"
+
+[attestation]
+# RTMR index used for workload measurement.
+rtmr_index = 2

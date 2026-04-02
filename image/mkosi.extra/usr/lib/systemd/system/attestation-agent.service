@@ -1,0 +1,12 @@
+[Unit]
+Description=TDX Attestation Agent
+After=sys-kernel-config.mount
+
+[Service]
+ExecStart=/usr/bin/attestation-agent --listen vsock://:4050
+Restart=on-failure
+ProtectSystem=strict
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

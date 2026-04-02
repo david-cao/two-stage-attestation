@@ -1,0 +1,21 @@
+# Build output
+bin/
+
+# Go
+*.exe
+*.test
+*.out
+
+# mkosi
+image/mkosi.output/
+image/mkosi.builddir/
+image/mkosi.cache/
+*.raw
+*.vmdk
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

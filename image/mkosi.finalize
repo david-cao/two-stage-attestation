@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+
+# Strip unnecessary files from the final image to reduce size.
+
+# Remove documentation.
+rm -rf "$BUILDROOT"/usr/share/doc
+rm -rf "$BUILDROOT"/usr/share/man
+rm -rf "$BUILDROOT"/usr/share/info
+
+# Remove locale data (keep en_US only).
+find "$BUILDROOT"/usr/share/locale -mindepth 1 -maxdepth 1 \
+    ! -name 'en_US' -exec rm -rf {} +
+
+# Remove package manager caches.
+rm -rf "$BUILDROOT"/var/cache/*
+rm -rf "$BUILDROOT"/var/lib/dnf
+
+# Enable the attestation-agent service.
+mkdir -p "$BUILDROOT"/usr/lib/systemd/system/multi-user.target.wants
+ln -sf ../attestation-agent.service \
+    "$BUILDROOT"/usr/lib/systemd/system/multi-user.target.wants/attestation-agent.service

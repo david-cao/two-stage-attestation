@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package attestation.agent.v1;
+
+option go_package = "github.com/davidcao/attestation-two-stage/agent/api/v1;agentv1";
+
+service AttestationAgent {
+  // Pull an OCI image, measure its manifest digest into RTMR[2], and start
+  // the container. Returns the container ID and the digest that was extended.
+  rpc LaunchContainer(LaunchRequest) returns (LaunchResponse);
+
+  // Generate a TDX quote with caller-supplied report data (64 bytes).
+  rpc GetQuote(QuoteRequest) returns (QuoteResponse);
+
+  // Generate an ephemeral TLS keypair with the TDX quote embedded in the
+  // X.509 certificate (RA-TLS).
+  rpc GetRATLSCredentials(RATLSRequest) returns (RATLSResponse);
+
+  // Health check — reports whether the agent is ready and whether TDX
+  // hardware is available.
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+}
+
+message LaunchRequest {
+  // OCI image reference (e.g. "docker.io/library/nginx:latest").
+  string image_ref = 1;
+  // Command to run inside the container. If empty, the image entrypoint is used.
+  repeated string command = 2;
+  // Environment variables passed to the container ("KEY=VALUE").
+  repeated string env = 3;
+}
+
+message LaunchResponse {
+  // Podman container ID.
+  string container_id = 1;
+  // SHA-256 OCI manifest digest that was measured.
+  string manifest_digest = 2;
+  // Hex-encoded RTMR[2] value after extension.
+  string rtmr2_value = 3;
+}
+
+message QuoteRequest {
+  // Caller-supplied report data, must be exactly 64 bytes.
+  bytes report_data = 1;
+}
+
+message QuoteResponse {
+  // Raw TDX quote blob.
+  bytes quote = 1;
+  // PEM-encoded certificate chain for quote signature verification.
+  bytes cert_chain = 2;
+}
+
+message RATLSRequest {}
+
+message RATLSResponse {
+  // PEM-encoded X.509 certificate containing the TDX quote.
+  bytes certificate = 1;
+  // PEM-encoded private key for the ephemeral TLS keypair.
+  bytes private_key = 2;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  // Whether the agent is ready to accept requests.
+  bool ready = 1;
+  // Whether TDX hardware is detected and available.
+  bool tdx_available = 2;
+  // Human-readable status message.
+  string message = 3;
+}
